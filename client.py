@@ -40,7 +40,6 @@ def main():
     parser = argparse.ArgumentParser(description="MiniRaft client")
     parser.add_argument("--host",  default="127.0.0.1")
     parser.add_argument("--port",  type=int, default=5000)
-    parser.add_argument("--peers", type=int, nargs="+", help="All node ports (for --all)")
 
     sub = parser.add_subparsers(dest="cmd")
 
@@ -52,9 +51,10 @@ def main():
     rp = sub.add_parser("read", help="Read a key from the state machine")
     rp.add_argument("key", type=str)
 
-    # status
+    # status  — --peers lives here now, not on the main parser
     sp = sub.add_parser("status", help="Show node status")
-    sp.add_argument("--all", action="store_true", help="Show all nodes")
+    sp.add_argument("--all",   action="store_true", help="Show all nodes")
+    sp.add_argument("--peers", type=int, nargs="+", help="All node ports")
 
     args = parser.parse_args()
 
