@@ -1,150 +1,189 @@
-# MiniRaft
+# Distributed Real-Time Drawing Board — Mini-RAFT
 
-A minimal implementation of the **Raft distributed consensus algorithm** in Python, built as part of a Cloud Computing course project.
-
-Raft keeps a cluster of servers in sync even when some crash or messages are lost. It does this by electing one **leader** who controls all writes, then replicating those writes to a majority of nodes before committing them.
+A fault-tolerant collaborative drawing platform backed by a simplified RAFT consensus protocol.
 
 ---
 
-## Features
-
-| Feature | File | Description |
-|---|---|---|
-| Leader election | `raft.py` | Randomised timeouts, RequestVote RPC, majority quorum |
-| Log replication | `raft.py` | AppendEntries RPC, consistency check, commit index |
-| Persistence | `persistence.py` | Atomic JSON flush to disk (survives crashes) |
-| Snapshots | `snapshot.py` | Log compaction + InstallSnapshot for lagging nodes |
-| Network layer | `server.py` | Newline-delimited JSON over TCP |
-| CLI client | `client.py` | Submit writes, read keys, view cluster status |
-
----
-
-## Architecture
+## Project Structure
 
 ```
-┌─────────────┐     AppendEntries / RequestVote      ┌─────────────┐
-│   Node 0    │◄───────────────────────────────────►│   Node 1    │
-│  (Leader)   │                                      │ (Follower)  │
-└──────┬──────┘                                      └─────────────┘
-       │                                                      ▲
-       │         AppendEntries / RequestVote                  │
-       └──────────────────────────────────────────────────────┘
-                              Node 2
-                           (Follower)
-
-Each node:
-  raft.py          ← consensus logic
-  persistence.py   ← current_term, voted_for, log  (disk)
-  snapshot.py      ← state machine snapshot         (disk)
-  server.py        ← TCP wrapper
-```
-
----
-
-## Raft Concepts Implemented
-
-### 1. Leader Election
-- Every node starts as a **Follower** with a randomised election timeout (1.5–3s)
-- If no heartbeat is received before the timeout, it becomes a **Candidate** and starts an election
-- A node wins if it receives votes from a **majority** (`floor(n/2) + 1`)
-- The log up-to-date check (§5.4.1) ensures only nodes with the most complete log can win
-
-### 2. Log Replication
-- Only the leader accepts client writes
-- The leader appends the entry locally, then sends `AppendEntries` to all followers
-- An entry is **committed** once a majority has it
-- Followers apply committed entries to their state machine in order
-
-### 3. Persistence (Crash Recovery)
-- `current_term`, `voted_for`, and `log[]` are flushed to disk atomically before responding to any RPC
-- On restart, a node reloads these and resumes from where it left off
-
-### 4. Snapshots (Log Compaction)
-- After every 10 committed entries, the leader takes a snapshot of the state machine
-- The log entries covered by the snapshot are discarded
-- Lagging followers receive the full snapshot via `InstallSnapshot`
-
----
-
-## State Machine
-
-A simple key-value store:
-
-```
-SET key value   →  state_machine[key] = value
-DEL key         →  del state_machine[key]
+miniraft/
+├── docker-compose.yml
+├── gateway/          ← WebSocket server, leader proxy, broadcast hub
+│   ├── index.js
+│   ├── package.json
+│   └── Dockerfile
+├── replica1/         ← RAFT node 1
+│   ├── index.js      ← Full RAFT logic (election, replication, heartbeat, sync)
+│   ├── package.json
+│   └── Dockerfile
+├── replica2/         ← RAFT node 2 (same code, different env vars)
+├── replica3/         ← RAFT node 3 (same code, different env vars)
+└── frontend/
+    └── index.html    ← Canvas drawing board (WebSocket client)
 ```
 
 ---
 
 ## Quick Start
 
-### Option A — In-memory demo (no networking)
+### 1. Build and run everything
+
 ```bash
-python demo.py
+docker compose up --build
 ```
 
-### Option B — Full networked cluster (3 terminals)
+### 2. Open the drawing board
 
-**Terminal 1:**
-```bash
-python server.py --id 0 --port 5000 --peers 5000 5001 5002
+```
+http://localhost:3000
 ```
 
-**Terminal 2:**
+Open in **multiple browser tabs** to simulate multiple users. Strokes drawn in one tab appear in all others.
+
+---
+
+## How to Demo the Assignment Requirements
+
+### ✅ Leader Election
+Watch the logs on startup:
 ```bash
-python server.py --id 1 --port 5001 --peers 5000 5001 5002
+docker compose logs -f replica1 replica2 replica3
+```
+You will see one replica win the election and log `Becoming LEADER`.
+
+### ✅ Kill the Leader & Automatic Failover
+```bash
+# Find the current leader first
+curl http://localhost:4000/health
+
+# Kill the leader (e.g., replica1)
+docker compose stop replica1
+```
+Within ~800ms, another replica becomes leader. Drawing continues uninterrupted.
+
+### ✅ Hot Reload a Replica (Zero Downtime)
+Edit any file in `replica2/index.js` (add a comment). The container auto-reloads via nodemon. RAFT re-elects if needed. Clients stay connected.
+
+### ✅ Rejoin a Stopped Replica
+```bash
+docker compose start replica1
+```
+Replica1 starts as Follower with empty log, detects mismatch, leader syncs all missing entries via `/sync-log`. Replica1 is back in sync.
+
+### ✅ Consistent State After Failures
+Strokes are only broadcast to clients AFTER a majority (2/3) of replicas confirm replication. If a replica is down, the other 2 still form a majority.
+
+---
+
+## API Reference
+
+### Gateway
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `ws://localhost:4000` | WS | Browser WebSocket connection |
+| `/broadcast` | POST | Called by leader to push committed strokes to all clients |
+| `/health` | GET | Returns current leader and client count |
+
+### Each Replica (ports 5001/5002/5003)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/status` | GET | Returns state (follower/candidate/leader), term, commitIndex |
+| `/log` | GET | Returns all committed log entries |
+| `/stroke` | POST | Accept a stroke (leader only) |
+| `/request-vote` | POST | RAFT vote request RPC |
+| `/append-entries` | POST | RAFT log replication RPC |
+| `/heartbeat` | POST | RAFT heartbeat RPC |
+| `/sync-log` | POST | Push missing entries to a catching-up follower |
+| `/health` | GET | Basic health check |
+
+---
+
+## Mini-RAFT Protocol Summary
+
+### Node States
+```
+FOLLOWER → (timeout, no heartbeat) → CANDIDATE → (majority votes) → LEADER
+CANDIDATE → (higher term seen)     → FOLLOWER
+LEADER    → (higher term seen)     → FOLLOWER
 ```
 
-**Terminal 3:**
-```bash
-python server.py --id 2 --port 5002 --peers 5000 5001 5002
+### Timing
+- **Election timeout**: 500–800ms (randomised to avoid split votes)
+- **Heartbeat interval**: 150ms
+
+### Log Replication Flow
+```
+Browser → (WS) → Gateway → (HTTP POST /stroke) → Leader
+Leader → AppendEntries → Follower1, Follower2
+Leader → (majority ACKs) → Commit → POST /broadcast → Gateway → all browsers
 ```
 
-**Terminal 4 (client):**
-```bash
-# Submit writes
-python client.py --port 5000 write "SET x 42"
-python client.py --port 5000 write "SET name Alice"
-
-# Read a value
-python client.py --port 5000 read x
-
-# View all node statuses
-python client.py --port 5000 status --all --peers 5000 5001 5002
+### Catch-Up (Restarted Node)
+```
+Restart → Follower (empty log)
+Follower receives AppendEntries → prevLogIndex mismatch → returns logLength
+Leader calls POST /sync-log on follower → sends all committed entries from that index
+Follower applies entries → back in sync
 ```
 
 ---
 
-## File Structure
+## Useful Debug Commands
 
-```
-miniraft/
-├── raft.py          # Core Raft node
-├── persistence.py   # Disk persistence
-├── snapshot.py      # Snapshot / log compaction
-├── server.py        # TCP server + remote peer proxy
-├── client.py        # CLI client
-├── demo.py          # In-process demo script
-└── README.md
+```bash
+# Check leader
+curl http://localhost:4000/health
+
+# Check each replica state
+curl http://localhost:5001/status
+curl http://localhost:5002/status
+curl http://localhost:5003/status
+
+# View committed log on replica
+curl http://localhost:5001/log
+
+# Live logs for all services
+docker compose logs -f
+
+# Restart a single replica (triggers catch-up)
+docker compose restart replica2
+
+# Stress test: rapid kill/restart
+docker compose stop replica1 && sleep 1 && docker compose start replica1
 ```
 
 ---
 
-## Relation to Course Syllabus
+## Architecture Diagram (Text)
 
-| Implementation | Syllabus Topic |
-|---|---|
-| Leader election, heartbeats | Unit 4: Leader election, cluster coordination |
-| AppendEntries, commit quorum | Unit 4: Distributed consensus, Raft case study |
-| Persistence (fsync) | Unit 4: Fault tolerance, checkpointing |
-| Snapshots, log compaction | Unit 4: Application recovery |
-| Randomised timeouts | Unit 4: Unreliable communication |
-| Replication majority check | Unit 3: Consistency models, replication |
+```
+┌─────────────┐      ┌──────────────────────────────────────────┐
+│  Browser 1  │      │              Docker Network               │
+│  Browser 2  │      │                                          │
+│  Browser 3  │      │  ┌──────────┐     ┌──────────────────┐  │
+│             │◄─WS──┼──┤ Gateway  │────►│   Replica 1      │  │
+└─────────────┘      │  │ :4000    │     │   (RAFT Leader)  │  │
+                     │  └──────────┘     └────────┬─────────┘  │
+                     │       ▲                     │ AppendEntries
+                     │       │ /broadcast          ▼            │
+                     │       │           ┌──────────────────┐  │
+                     │       └───────────┤   Replica 2      │  │
+                     │                   │   (Follower)     │  │
+                     │                   └──────────────────┘  │
+                     │                   ┌──────────────────┐  │
+                     │                   │   Replica 3      │  │
+                     │                   │   (Follower)     │  │
+                     │                   └──────────────────┘  │
+                     └──────────────────────────────────────────┘
+```
 
 ---
 
-## References
+## Team
 
-- [In Search of an Understandable Consensus Algorithm (Raft paper)](https://raft.github.io/raft.pdf)
-- [Raft visualisation](https://raft.github.io)
+This project was built as a 3-week distributed systems assignment simulating:
+- Kubernetes-style leader consensus (etcd/RAFT)
+- Real-time collaborative apps (Figma, Miro)
+- Zero-downtime rolling deployments
+- Microservice fault tolerance
