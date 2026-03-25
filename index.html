@@ -1,498 +1,567 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>DistDraw — Distributed Drawing Board</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap');
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DistDraw — Distributed Drawing Board</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap');
 
-  :root {
-    --bg: #0d0d0f;
-    --surface: #16161a;
-    --border: #2a2a35;
-    --accent: #7c3aed;
-    --accent2: #06b6d4;
-    --text: #e8e8f0;
-    --muted: #6b6b80;
-    --green: #10b981;
-    --red: #ef4444;
-    --yellow: #f59e0b;
-  }
+    :root {
+      --bg: #0d0d0f;
+      --surface: #16161a;
+      --border: #2a2a35;
+      --accent: #7c3aed;
+      --accent2: #06b6d4;
+      --text: #e8e8f0;
+      --muted: #6b6b80;
+      --green: #10b981;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+    }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    overflow: hidden;
-  }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
 
-  /* ── Header ── */
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 20px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    z-index: 10;
-  }
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      z-index: 10;
+    }
 
-  .logo {
-    font-family: 'Space Mono', monospace;
-    font-size: 1rem;
-    font-weight: 700;
-    letter-spacing: 2px;
-    color: var(--text);
-  }
-  .logo span { color: var(--accent); }
+    .logo {
+      font-family: 'Space Mono', monospace;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--text);
+    }
 
-  /* ── Status Bar ── */
-  .status-bar {
-    display: flex;
-    gap: 16px;
-    align-items: center;
-    font-size: 0.75rem;
-    font-family: 'Space Mono', monospace;
-  }
+    .logo span {
+      color: var(--accent);
+    }
 
-  .status-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--muted);
-  }
+    /* ── Status Bar ── */
+    .status-bar {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: 0.75rem;
+      font-family: 'Space Mono', monospace;
+    }
 
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--muted);
-    transition: background 0.4s;
-  }
-  .dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  .dot.disconnected { background: var(--red); }
-  .dot.leader { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+    }
 
-  #ws-status { color: var(--text); }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.4s;
+    }
 
-  /* ── Toolbar ── */
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 20px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
+    .dot.connected {
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+    }
 
-  .tool-label {
-    font-size: 0.7rem;
-    font-family: 'Space Mono', monospace;
-    color: var(--muted);
-    letter-spacing: 1px;
-    text-transform: uppercase;
-  }
+    .dot.disconnected {
+      background: var(--red);
+    }
 
-  .color-swatches {
-    display: flex;
-    gap: 6px;
-  }
+    .dot.leader {
+      background: var(--accent2);
+      box-shadow: 0 0 6px var(--accent2);
+    }
 
-  .swatch {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    cursor: pointer;
-    border: 2px solid transparent;
-    transition: transform 0.15s, border-color 0.15s;
-  }
-  .swatch:hover { transform: scale(1.15); }
-  .swatch.active { border-color: white; transform: scale(1.15); }
+    #ws-status {
+      color: var(--text);
+    }
 
-  .size-buttons {
-    display: flex;
-    gap: 6px;
-  }
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
 
-  .size-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    cursor: pointer;
-    color: var(--text);
-    font-size: 0.7rem;
-    font-family: 'Space Mono', monospace;
-    transition: background 0.15s, border-color 0.15s;
-  }
-  .size-btn:hover { background: var(--border); }
-  .size-btn.active { background: var(--accent); border-color: var(--accent); }
+    .tool-label {
+      font-size: 0.7rem;
+      font-family: 'Space Mono', monospace;
+      color: var(--muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
 
-  .divider {
-    width: 1px;
-    height: 24px;
-    background: var(--border);
-  }
+    .color-swatches {
+      display: flex;
+      gap: 6px;
+    }
 
-  .action-btn {
-    padding: 5px 14px;
-    border-radius: 6px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    cursor: pointer;
-    color: var(--text);
-    font-size: 0.75rem;
-    font-family: 'Space Mono', monospace;
-    letter-spacing: 1px;
-    transition: background 0.15s, border-color 0.15s;
-  }
-  .action-btn:hover { background: var(--border); }
-  .action-btn.erase { border-color: var(--red); color: var(--red); }
-  .action-btn.erase:hover { background: var(--red); color: white; }
+    .swatch {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: transform 0.15s, border-color 0.15s;
+    }
 
-  /* ── Canvas Area ── */
-  .canvas-wrapper {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-  }
+    .swatch:hover {
+      transform: scale(1.15);
+    }
 
-  canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    cursor: crosshair;
-    touch-action: none;
-  }
+    .swatch.active {
+      border-color: white;
+      transform: scale(1.15);
+    }
 
-  /* Grid overlay */
-  canvas#grid-canvas { pointer-events: none; opacity: 0.07; }
+    .size-buttons {
+      display: flex;
+      gap: 6px;
+    }
 
-  /* ── Log Panel ── */
-  .log-panel {
-    flex-shrink: 0;
-    height: 80px;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
-    padding: 6px 16px;
-    overflow-y: auto;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.65rem;
-    color: var(--muted);
-    line-height: 1.6;
-  }
+    .size-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      color: var(--text);
+      font-size: 0.7rem;
+      font-family: 'Space Mono', monospace;
+      transition: background 0.15s, border-color 0.15s;
+    }
 
-  .log-entry { color: var(--muted); }
-  .log-entry.info { color: var(--accent2); }
-  .log-entry.success { color: var(--green); }
-  .log-entry.warn { color: var(--yellow); }
-  .log-entry.error { color: var(--red); }
+    .size-btn:hover {
+      background: var(--border);
+    }
 
-  /* ── Notifications ── */
-  #toast {
-    position: fixed;
-    bottom: 100px;
-    right: 20px;
-    padding: 10px 18px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-size: 0.75rem;
-    font-family: 'Space Mono', monospace;
-    color: var(--text);
-    opacity: 0;
-    transform: translateY(10px);
-    transition: opacity 0.3s, transform 0.3s;
-    pointer-events: none;
-    z-index: 100;
-  }
-  #toast.show { opacity: 1; transform: translateY(0); }
-</style>
+    .size-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .divider {
+      width: 1px;
+      height: 24px;
+      background: var(--border);
+    }
+
+    .action-btn {
+      padding: 5px 14px;
+      border-radius: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      color: var(--text);
+      font-size: 0.75rem;
+      font-family: 'Space Mono', monospace;
+      letter-spacing: 1px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .action-btn:hover {
+      background: var(--border);
+    }
+
+    .action-btn.erase {
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    .action-btn.erase:hover {
+      background: var(--red);
+      color: white;
+    }
+
+    /* ── Canvas Area ── */
+    .canvas-wrapper {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    /* Grid overlay */
+    canvas#grid-canvas {
+      pointer-events: none;
+      opacity: 0.07;
+    }
+
+    /* ── Log Panel ── */
+    .log-panel {
+      flex-shrink: 0;
+      height: 80px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 6px 16px;
+      overflow-y: auto;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.65rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .log-entry {
+      color: var(--muted);
+    }
+
+    .log-entry.info {
+      color: var(--accent2);
+    }
+
+    .log-entry.success {
+      color: var(--green);
+    }
+
+    .log-entry.warn {
+      color: var(--yellow);
+    }
+
+    .log-entry.error {
+      color: var(--red);
+    }
+
+    /* ── Notifications ── */
+    #toast {
+      position: fixed;
+      bottom: 100px;
+      right: 20px;
+      padding: 10px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.75rem;
+      font-family: 'Space Mono', monospace;
+      color: var(--text);
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.3s, transform 0.3s;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
 </head>
+
 <body>
 
-<header>
-  <div class="logo">DIST<span>DRAW</span></div>
-  <div class="status-bar">
-    <div class="status-item">
-      <div class="dot" id="ws-dot"></div>
-      <span id="ws-status">connecting...</span>
+  <header>
+    <div class="logo">DIST<span>DRAW</span></div>
+    <div class="status-bar">
+      <div class="status-item">
+        <div class="dot" id="ws-dot"></div>
+        <span id="ws-status">connecting...</span>
+      </div>
+      <div class="status-item">
+        <div class="dot leader" id="leader-dot"></div>
+        <span id="leader-status">leader: —</span>
+      </div>
+      <div class="status-item" id="stroke-count-item">
+        <span id="stroke-count">0 strokes</span>
+      </div>
     </div>
-    <div class="status-item">
-      <div class="dot leader" id="leader-dot"></div>
-      <span id="leader-status">leader: —</span>
+  </header>
+
+  <div class="toolbar">
+    <span class="tool-label">color</span>
+    <div class="color-swatches" id="color-swatches">
+      <div class="swatch active" style="background:#e8e8f0" data-color="#e8e8f0"></div>
+      <div class="swatch" style="background:#7c3aed" data-color="#7c3aed"></div>
+      <div class="swatch" style="background:#06b6d4" data-color="#06b6d4"></div>
+      <div class="swatch" style="background:#10b981" data-color="#10b981"></div>
+      <div class="swatch" style="background:#f59e0b" data-color="#f59e0b"></div>
+      <div class="swatch" style="background:#ef4444" data-color="#ef4444"></div>
+      <div class="swatch" style="background:#f472b6" data-color="#f472b6"></div>
     </div>
-    <div class="status-item" id="stroke-count-item">
-      <span id="stroke-count">0 strokes</span>
+    <div class="divider"></div>
+    <span class="tool-label">size</span>
+    <div class="size-buttons">
+      <button class="size-btn active" data-size="3">S</button>
+      <button class="size-btn" data-size="8">M</button>
+      <button class="size-btn" data-size="16">L</button>
+      <button class="size-btn" data-size="28">XL</button>
     </div>
+    <div class="divider"></div>
+    <button class="action-btn erase" id="clear-btn">CLEAR</button>
   </div>
-</header>
 
-<div class="toolbar">
-  <span class="tool-label">color</span>
-  <div class="color-swatches" id="color-swatches">
-    <div class="swatch active" style="background:#e8e8f0" data-color="#e8e8f0"></div>
-    <div class="swatch" style="background:#7c3aed" data-color="#7c3aed"></div>
-    <div class="swatch" style="background:#06b6d4" data-color="#06b6d4"></div>
-    <div class="swatch" style="background:#10b981" data-color="#10b981"></div>
-    <div class="swatch" style="background:#f59e0b" data-color="#f59e0b"></div>
-    <div class="swatch" style="background:#ef4444" data-color="#ef4444"></div>
-    <div class="swatch" style="background:#f472b6" data-color="#f472b6"></div>
+  <div class="canvas-wrapper">
+    <canvas id="grid-canvas"></canvas>
+    <canvas id="draw-canvas"></canvas>
   </div>
-  <div class="divider"></div>
-  <span class="tool-label">size</span>
-  <div class="size-buttons">
-    <button class="size-btn active" data-size="3">S</button>
-    <button class="size-btn" data-size="8">M</button>
-    <button class="size-btn" data-size="16">L</button>
-    <button class="size-btn" data-size="28">XL</button>
+
+  <div class="log-panel" id="log-panel">
+    <div class="log-entry info">[ system ] DistDraw initialized</div>
   </div>
-  <div class="divider"></div>
-  <button class="action-btn erase" id="clear-btn">CLEAR</button>
-</div>
 
-<div class="canvas-wrapper">
-  <canvas id="grid-canvas"></canvas>
-  <canvas id="draw-canvas"></canvas>
-</div>
+  <div id="toast"></div>
 
-<div class="log-panel" id="log-panel">
-  <div class="log-entry info">[ system ] DistDraw initialized</div>
-</div>
+  <script>
+    // ─── Canvas Setup ────────────────────────────────────────────────────────────
+    const gridCanvas = document.getElementById('grid-canvas');
+    const drawCanvas = document.getElementById('draw-canvas');
+    const wrapper = drawCanvas.parentElement;
+    const gctx = gridCanvas.getContext('2d');
+    const ctx = drawCanvas.getContext('2d');
 
-<div id="toast"></div>
-
-<script>
-  // ─── Canvas Setup ────────────────────────────────────────────────────────────
-  const gridCanvas = document.getElementById('grid-canvas');
-  const drawCanvas = document.getElementById('draw-canvas');
-  const wrapper = drawCanvas.parentElement;
-  const gctx = gridCanvas.getContext('2d');
-  const ctx = drawCanvas.getContext('2d');
-
-  function resize() {
-    const w = wrapper.clientWidth;
-    const h = wrapper.clientHeight;
-    [gridCanvas, drawCanvas].forEach(c => { c.width = w; c.height = h; });
-    drawGrid();
-  }
-
-  function drawGrid() {
-    gctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
-    gctx.strokeStyle = '#ffffff';
-    gctx.lineWidth = 0.5;
-    const step = 40;
-    for (let x = 0; x < gridCanvas.width; x += step) {
-      gctx.beginPath(); gctx.moveTo(x, 0); gctx.lineTo(x, gridCanvas.height); gctx.stroke();
+    function resize() {
+      const w = wrapper.clientWidth;
+      const h = wrapper.clientHeight;
+      [gridCanvas, drawCanvas].forEach(c => { c.width = w; c.height = h; });
+      drawGrid();
     }
-    for (let y = 0; y < gridCanvas.height; y += step) {
-      gctx.beginPath(); gctx.moveTo(0, y); gctx.lineTo(gridCanvas.width, y); gctx.stroke();
+
+    function drawGrid() {
+      gctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+      gctx.strokeStyle = '#ffffff';
+      gctx.lineWidth = 0.5;
+      const step = 40;
+      for (let x = 0; x < gridCanvas.width; x += step) {
+        gctx.beginPath(); gctx.moveTo(x, 0); gctx.lineTo(x, gridCanvas.height); gctx.stroke();
+      }
+      for (let y = 0; y < gridCanvas.height; y += step) {
+        gctx.beginPath(); gctx.moveTo(0, y); gctx.lineTo(gridCanvas.width, y); gctx.stroke();
+      }
     }
-  }
 
-  window.addEventListener('resize', resize);
-  resize();
+    window.addEventListener('resize', resize);
+    resize();
 
-  // ─── Drawing State ────────────────────────────────────────────────────────────
-  let drawing = false;
-  let currentColor = '#e8e8f0';
-  let currentSize = 3;
-  let currentPath = [];
-  let strokeCount = 0;
+    // ─── Drawing State ────────────────────────────────────────────────────────────
+    let drawing = false;
+    let currentColor = '#e8e8f0';
+    let currentSize = 3;
+    let currentPath = [];
+    let strokeCount = 0;
 
-  // ─── Toolbar Logic ────────────────────────────────────────────────────────────
-  document.querySelectorAll('.swatch').forEach(s => {
-    s.addEventListener('click', () => {
-      document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
-      s.classList.add('active');
-      currentColor = s.dataset.color;
+    // ─── Toolbar Logic ────────────────────────────────────────────────────────────
+    document.querySelectorAll('.swatch').forEach(s => {
+      s.addEventListener('click', () => {
+        document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
+        s.classList.add('active');
+        currentColor = s.dataset.color;
+      });
     });
-  });
 
-  document.querySelectorAll('.size-btn').forEach(b => {
-    b.addEventListener('click', () => {
-      document.querySelectorAll('.size-btn').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      currentSize = parseInt(b.dataset.size);
+    document.querySelectorAll('.size-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.size-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        currentSize = parseInt(b.dataset.size);
+      });
     });
-  });
 
-  document.getElementById('clear-btn').addEventListener('click', () => {
-    ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
-    strokeCount = 0;
-    document.getElementById('stroke-count').textContent = '0 strokes';
-    addLog('Canvas cleared locally', 'warn');
-  });
+    document.getElementById('clear-btn').addEventListener('click', () => {
+      ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      strokeCount = 0;
+      document.getElementById('stroke-count').textContent = '0 strokes';
+      addLog('Canvas cleared locally', 'warn');
+    });
 
-  // ─── Draw on Canvas ───────────────────────────────────────────────────────────
-  function getPos(e) {
-    const rect = drawCanvas.getBoundingClientRect();
-    const src = e.touches ? e.touches[0] : e;
-    return {
-      x: (src.clientX - rect.left) / rect.width,
-      y: (src.clientY - rect.top) / rect.height
-    };
-  }
+    // ─── Draw on Canvas ───────────────────────────────────────────────────────────
+    function getPos(e) {
+      const rect = drawCanvas.getBoundingClientRect();
+      const src = e.touches ? e.touches[0] : e;
+      return {
+        x: (src.clientX - rect.left) / rect.width,
+        y: (src.clientY - rect.top) / rect.height
+      };
+    }
 
-  function drawStroke(stroke) {
-    if (!stroke.points || stroke.points.length < 2) return;
-    ctx.beginPath();
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = stroke.size;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    function drawStroke(stroke) {
+      if (!stroke.points || stroke.points.length < 2) return;
+      ctx.beginPath();
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.size;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
 
-    const p0 = stroke.points[0];
-    ctx.moveTo(p0.x * drawCanvas.width, p0.y * drawCanvas.height);
-    for (let i = 1; i < stroke.points.length; i++) {
-      const p = stroke.points[i];
+      const p0 = stroke.points[0];
+      ctx.moveTo(p0.x * drawCanvas.width, p0.y * drawCanvas.height);
+      for (let i = 1; i < stroke.points.length; i++) {
+        const p = stroke.points[i];
+        ctx.lineTo(p.x * drawCanvas.width, p.y * drawCanvas.height);
+      }
+      ctx.stroke();
+      strokeCount++;
+      document.getElementById('stroke-count').textContent = `${strokeCount} strokes`;
+    }
+
+    drawCanvas.addEventListener('pointerdown', e => {
+      drawing = true;
+      currentPath = [getPos(e)];
+      ctx.beginPath();
+      ctx.strokeStyle = currentColor;
+      ctx.lineWidth = currentSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const p = getPos(e);
+      ctx.moveTo(p.x * drawCanvas.width, p.y * drawCanvas.height);
+    });
+
+    drawCanvas.addEventListener('pointermove', e => {
+      if (!drawing) return;
+      const p = getPos(e);
+      currentPath.push(p);
       ctx.lineTo(p.x * drawCanvas.width, p.y * drawCanvas.height);
-    }
-    ctx.stroke();
-    strokeCount++;
-    document.getElementById('stroke-count').textContent = `${strokeCount} strokes`;
-  }
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(p.x * drawCanvas.width, p.y * drawCanvas.height);
+    });
 
-  drawCanvas.addEventListener('pointerdown', e => {
-    drawing = true;
-    currentPath = [getPos(e)];
-    ctx.beginPath();
-    ctx.strokeStyle = currentColor;
-    ctx.lineWidth = currentSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    const p = getPos(e);
-    ctx.moveTo(p.x * drawCanvas.width, p.y * drawCanvas.height);
-  });
-
-  drawCanvas.addEventListener('pointermove', e => {
-    if (!drawing) return;
-    const p = getPos(e);
-    currentPath.push(p);
-    ctx.lineTo(p.x * drawCanvas.width, p.y * drawCanvas.height);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(p.x * drawCanvas.width, p.y * drawCanvas.height);
-  });
-
-  drawCanvas.addEventListener('pointerup', e => {
-    if (!drawing) return;
-    drawing = false;
-    const stroke = { color: currentColor, size: currentSize, points: currentPath };
-    sendStroke(stroke);
-  });
-
-  drawCanvas.addEventListener('pointerleave', e => {
-    if (drawing) {
+    drawCanvas.addEventListener('pointerup', e => {
+      if (!drawing) return;
       drawing = false;
       const stroke = { color: currentColor, size: currentSize, points: currentPath };
       sendStroke(stroke);
-    }
-  });
+    });
 
-  // ─── WebSocket ────────────────────────────────────────────────────────────────
-  const WS_URL = `ws://${location.hostname}:4000`;
-  let ws = null;
-  let reconnectTimer = null;
-
-  function connect() {
-    clearTimeout(reconnectTimer);
-    addLog(`Connecting to ${WS_URL}...`, 'info');
-    ws = new WebSocket(WS_URL);
-
-    ws.onopen = () => {
-      setStatus('connected');
-      addLog('WebSocket connected to Gateway', 'success');
-      showToast('Connected to cluster');
-    };
-
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'stroke') {
-        drawStroke(msg.stroke);
-      } else if (msg.type === 'init') {
-        addLog(`Received ${msg.strokes.length} committed strokes from cluster`, 'info');
-        msg.strokes.forEach(s => drawStroke(s));
+    drawCanvas.addEventListener('pointerleave', e => {
+      if (drawing) {
+        drawing = false;
+        const stroke = { color: currentColor, size: currentSize, points: currentPath };
+        sendStroke(stroke);
       }
-    };
+    });
 
-    ws.onclose = () => {
-      setStatus('disconnected');
-      addLog('Connection lost, reconnecting in 2s...', 'warn');
-      reconnectTimer = setTimeout(connect, 2000);
-    };
+    // ─── WebSocket ────────────────────────────────────────────────────────────────
+    const WS_URL = `ws://${location.hostname}:4000`;
+    let ws = null;
+    let reconnectTimer = null;
 
-    ws.onerror = () => {
-      addLog('WebSocket error', 'error');
-    };
-  }
+    function connect() {
+      clearTimeout(reconnectTimer);
+      addLog(`Connecting to ${WS_URL}...`, 'info');
+      ws = new WebSocket(WS_URL);
 
-  function sendStroke(stroke) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'stroke', stroke }));
-      addLog(`Stroke sent (${stroke.points.length} pts, ${stroke.color})`, 'info');
-    } else {
-      addLog('Not connected — stroke dropped', 'error');
-      showToast('⚠ Not connected');
+      ws.onopen = () => {
+        setStatus('connected');
+        addLog('WebSocket connected to Gateway', 'success');
+        showToast('Connected to cluster');
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'stroke') {
+          drawStroke(msg.stroke);
+        } else if (msg.type === 'init') {
+          addLog(`Received ${msg.strokes.length} committed strokes from cluster`, 'info');
+          msg.strokes.forEach(s => drawStroke(s));
+        }
+      };
+
+      ws.onclose = () => {
+        setStatus('disconnected');
+        addLog('Connection lost, reconnecting in 2s...', 'warn');
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => {
+        addLog('WebSocket error', 'error');
+      };
     }
-  }
 
-  // ─── Status Helpers ───────────────────────────────────────────────────────────
-  function setStatus(s) {
-    const dot = document.getElementById('ws-dot');
-    const label = document.getElementById('ws-status');
-    dot.className = 'dot ' + s;
-    label.textContent = s;
-  }
+    function sendStroke(stroke) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'stroke', stroke }));
+        addLog(`Stroke sent (${stroke.points.length} pts, ${stroke.color})`, 'info');
+      } else {
+        addLog('Not connected — stroke dropped', 'error');
+        showToast('⚠ Not connected');
+      }
+    }
 
-  // Poll gateway for leader info
-  setInterval(async () => {
-    try {
-      const res = await fetch(`http://${location.hostname}:4000/health`);
-      const data = await res.json();
-      document.getElementById('leader-status').textContent = `leader: ${data.leader || '—'}`;
-    } catch (_) {}
-  }, 1000);
+    // ─── Status Helpers ───────────────────────────────────────────────────────────
+    function setStatus(s) {
+      const dot = document.getElementById('ws-dot');
+      const label = document.getElementById('ws-status');
+      dot.className = 'dot ' + s;
+      label.textContent = s;
+    }
 
-  // ─── Log Panel ────────────────────────────────────────────────────────────────
-  function addLog(msg, type = '') {
-    const panel = document.getElementById('log-panel');
-    const now = new Date().toLocaleTimeString('en', { hour12: false });
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
-    entry.textContent = `[ ${now} ] ${msg}`;
-    panel.appendChild(entry);
-    panel.scrollTop = panel.scrollHeight;
-    // Keep last 100
-    while (panel.children.length > 100) panel.removeChild(panel.firstChild);
-  }
+    // Poll gateway for leader info
+    setInterval(async () => {
+      try {
+        const res = await fetch(`http://192.168.2.1:4000/health`);
+        const data = await res.json();
+        document.getElementById('leader-status').textContent = `leader: ${data.leader || '—'}`;
+      } catch (_) { }
+    }, 1000);
 
-  // ─── Toast ────────────────────────────────────────────────────────────────────
-  let toastTimer;
-  function showToast(msg) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
-  }
+    // ─── Log Panel ────────────────────────────────────────────────────────────────
+    function addLog(msg, type = '') {
+      const panel = document.getElementById('log-panel');
+      const now = new Date().toLocaleTimeString('en', { hour12: false });
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[ ${now} ] ${msg}`;
+      panel.appendChild(entry);
+      panel.scrollTop = panel.scrollHeight;
+      // Keep last 100
+      while (panel.children.length > 100) panel.removeChild(panel.firstChild);
+    }
 
-  // ─── Boot ─────────────────────────────────────────────────────────────────────
-  connect();
-</script>
+    // ─── Toast ────────────────────────────────────────────────────────────────────
+    let toastTimer;
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    // ─── Boot ─────────────────────────────────────────────────────────────────────
+    connect();
+  </script>
 </body>
+
 </html>
