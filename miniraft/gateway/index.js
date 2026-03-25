@@ -13,9 +13,9 @@ const PORT = process.env.PORT || 4000;
 
 // Replica registry: id -> base URL
 const REPLICAS = {
-  replica1: "http://localhost:5001",
-  replica2: "http://localhost:5002",
-  replica3: "http://localhost:5003",
+  replica1: "http://replica1:5001",
+  replica2: "http://replica2:5002",
+  replica3: "http://replica3:5003",
 };
 
 let currentLeader = null;

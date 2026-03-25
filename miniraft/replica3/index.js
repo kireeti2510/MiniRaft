@@ -7,12 +7,12 @@ app.use(express.json());
 // ─── Configuration ────────────────────────────────────────────────────────────
 const REPLICA_ID = process.env.REPLICA_ID || "replica1";
 const PORT = parseInt(process.env.PORT || "5001");
-const GATEWAY_URL = process.env.GATEWAY_URL || "http://localhost:4000";
+const GATEWAY_URL = process.env.GATEWAY_URL || "http://gateway:4000";
 
 const ALL_REPLICAS = {
-  replica1: "http://localhost:5001",
-  replica2: "http://localhost:5002",
-  replica3: "http://localhost:5003",
+  replica1: "http://replica1:5001",
+  replica2: "http://replica2:5002",
+  replica3: "http://replica3:5003",
 };
 const PEERS = Object.entries(ALL_REPLICAS).filter(([id]) => id !== REPLICA_ID);
 
