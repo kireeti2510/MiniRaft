@@ -12,10 +12,13 @@ const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 4000;
 
 // Replica registry: id -> base URL
+// Use env vars so same code works in Docker (hostname) and locally (localhost)
 const REPLICAS = {
-  replica1: "http://replica1:5001",
-  replica2: "http://replica2:5002",
-  replica3: "http://replica3:5003",
+  replica1: process.env.PEER_REPLICA1_URL || "http://localhost:5001",
+  replica2: process.env.PEER_REPLICA2_URL || "http://localhost:5002",
+  replica3: process.env.PEER_REPLICA3_URL || "http://localhost:5003",
+  replica4: process.env.PEER_REPLICA4_URL || "http://localhost:5004",
+  replica5: process.env.PEER_REPLICA5_URL || "http://localhost:5005",
 };
 
 let currentLeader = null;

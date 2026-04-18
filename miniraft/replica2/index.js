@@ -7,20 +7,25 @@ app.use(express.json());
 // ─── Configuration ────────────────────────────────────────────────────────────
 const REPLICA_ID = process.env.REPLICA_ID || "replica1";
 const PORT = parseInt(process.env.PORT || "5001");
-const GATEWAY_URL = process.env.GATEWAY_URL || "http://gateway:4000";
+const GATEWAY_URL = process.env.GATEWAY_URL || "http://localhost:4000";
 
+// Peer URLs — use env vars so the same code works both locally and in Docker.
+// In Docker, PEER_REPLICA1_URL etc. are set to http://replica1:5001.
+// Locally (no Docker), they fall back to localhost.
 const ALL_REPLICAS = {
-  replica1: "http://replica1:5001",
-  replica2: "http://replica2:5002",
-  replica3: "http://replica3:5003",
+  replica1: process.env.PEER_REPLICA1_URL || "http://localhost:5001",
+  replica2: process.env.PEER_REPLICA2_URL || "http://localhost:5002",
+  replica3: process.env.PEER_REPLICA3_URL || "http://localhost:5003",
+  replica4: process.env.PEER_REPLICA4_URL || "http://localhost:5004",
+  replica5: process.env.PEER_REPLICA5_URL || "http://localhost:5005",
 };
 const PEERS = Object.entries(ALL_REPLICAS).filter(([id]) => id !== REPLICA_ID);
 
 // ─── RAFT State ───────────────────────────────────────────────────────────────
-let state = "follower";  // follower | candidate | leader
+let state = "follower"; // follower | candidate | leader
 let currentTerm = 0;
 let votedFor = null;
-let log = [];            // Array of { term, index, stroke }
+let log = []; // Array of { term, index, stroke }
 let commitIndex = -1;
 let leaderId = null;
 
@@ -39,7 +44,9 @@ function log_(msg) {
 // ─── Timer Management ─────────────────────────────────────────────────────────
 function resetElectionTimer() {
   clearTimeout(electionTimer);
-  const timeout = ELECTION_TIMEOUT_MIN + Math.random() * (ELECTION_TIMEOUT_MAX - ELECTION_TIMEOUT_MIN);
+  const timeout =
+    ELECTION_TIMEOUT_MIN +
+    Math.random() * (ELECTION_TIMEOUT_MAX - ELECTION_TIMEOUT_MIN);
   electionTimer = setTimeout(startElection, timeout);
 }
 
@@ -73,7 +80,7 @@ function becomeLeader() {
   leaderId = REPLICA_ID;
   stopElectionTimer();
   startHeartbeatTimer();
-  // Immediately send heartbeats
+  // Immediately send heartbeats to assert leadership
   sendHeartbeats();
 }
 
@@ -83,25 +90,37 @@ async function startElection() {
 
   state = "candidate";
   currentTerm += 1;
+  const electionTerm = currentTerm; // snapshot to detect stale results
   votedFor = REPLICA_ID;
   let votes = 1; // vote for self
 
-  log_(`Starting election for term ${currentTerm}`);
-  resetElectionTimer();
+  log_(`Starting election for term ${electionTerm}`);
+  resetElectionTimer(); // re-arm in case this election times out
+
+  const lastLogIndex = log.length - 1;
+  const lastLogTerm = lastLogIndex >= 0 ? log[lastLogIndex].term : 0;
 
   const votePromises = PEERS.map(async ([peerId, peerUrl]) => {
     try {
-      const lastLogIndex = log.length - 1;
-      const lastLogTerm = lastLogIndex >= 0 ? log[lastLogIndex].term : 0;
       const res = await axios.post(
         `${peerUrl}/request-vote`,
-        { term: currentTerm, candidateId: REPLICA_ID, lastLogIndex, lastLogTerm },
+        {
+          term: electionTerm,
+          candidateId: REPLICA_ID,
+          lastLogIndex,
+          lastLogTerm,
+        },
         { timeout: 400 }
       );
+
+      // Ignore stale responses if we have moved to a newer term or state
+      if (currentTerm !== electionTerm || state !== "candidate") return;
+
       if (res.data.voteGranted) {
         votes++;
         log_(`Got vote from ${peerId} (total: ${votes})`);
       } else if (res.data.term > currentTerm) {
+        // Discovered a higher term — step down immediately
         becomeFollower(res.data.term);
       }
     } catch (err) {
@@ -111,11 +130,15 @@ async function startElection() {
 
   await Promise.allSettled(votePromises);
 
-  if (state === "candidate" && votes >= 2) {
+  // After all votes are in, decide outcome (only if still in this election)
+  if (state !== "candidate" || currentTerm !== electionTerm) return;
+
+  const majority = Math.floor((Object.keys(ALL_REPLICAS).length) / 2) + 1;
+  if (votes >= majority) {
     becomeLeader();
-  } else if (state === "candidate") {
-    log_(`Lost election (${votes} votes), reverting to follower`);
-    becomeFollower(currentTerm);
+  } else {
+    log_(`Lost election (${votes}/${Object.keys(ALL_REPLICAS).length} votes), reverting to follower`);
+    becomeFollower(electionTerm);
   }
 }
 
@@ -135,8 +158,13 @@ async function sendHeartbeats() {
         return;
       }
       // Proactively sync follower if it is behind
-      if (res.data.logLength !== undefined && res.data.logLength < commitIndex + 1) {
-        log_(`${peerId} is behind (has ${res.data.logLength}, need ${commitIndex + 1}), syncing...`);
+      if (
+        res.data.logLength !== undefined &&
+        res.data.logLength < commitIndex + 1
+      ) {
+        log_(
+          `${peerId} is behind (has ${res.data.logLength}, need ${commitIndex + 1}), syncing...`
+        );
         await syncFollower(peerId, peerUrl, res.data.logLength - 1);
       }
     } catch (_) {}
@@ -153,7 +181,13 @@ async function replicateEntry(entry) {
       const prevTerm = prevIndex >= 0 ? log[prevIndex].term : 0;
       const res = await axios.post(
         `${peerUrl}/append-entries`,
-        { term: currentTerm, leaderId: REPLICA_ID, entry, prevLogIndex: prevIndex, prevLogTerm: prevTerm },
+        {
+          term: currentTerm,
+          leaderId: REPLICA_ID,
+          entry,
+          prevLogIndex: prevIndex,
+          prevLogTerm: prevTerm,
+        },
         { timeout: 600 }
       );
       if (res.data.success) {
@@ -168,14 +202,21 @@ async function replicateEntry(entry) {
   });
 
   await Promise.allSettled(replicatePromises);
-  return acks >= 2;
+  const majority = Math.floor(Object.keys(ALL_REPLICAS).length / 2) + 1;
+  return acks >= majority;
 }
 
 // ─── Sync Log (for restarted nodes) ──────────────────────────────────────────
 async function syncFollower(followerId, peerUrl, fromIndex) {
-  const missing = log.filter((e) => e.index > fromIndex && e.index <= commitIndex);
+  const missing = log.filter(
+    (e) => e.index > fromIndex && e.index <= commitIndex
+  );
   try {
-    await axios.post(`${peerUrl}/sync-log`, { entries: missing, commitIndex }, { timeout: 1000 });
+    await axios.post(
+      `${peerUrl}/sync-log`,
+      { entries: missing, commitIndex },
+      { timeout: 1000 }
+    );
     log_(`Synced ${missing.length} entries to ${followerId}`);
   } catch (err) {
     log_(`Sync failed for ${followerId}: ${err.message}`);
@@ -193,16 +234,27 @@ async function broadcastToGateway(stroke) {
 
 // ─── HTTP Endpoints ───────────────────────────────────────────────────────────
 
-// Status - used by gateway for leader discovery
+// Status — used by gateway for leader discovery
 app.get("/status", (_, res) => {
-  res.json({ id: REPLICA_ID, state, term: currentTerm, leader: leaderId, logLength: log.length, commitIndex });
+  res.json({
+    id: REPLICA_ID,
+    state,
+    term: currentTerm,
+    leader: leaderId,
+    logLength: log.length,
+    commitIndex,
+  });
 });
 
-// Full committed log - used by gateway to init new clients
+// Full committed log — used by gateway to init new clients
 app.get("/log", (_, res) => {
   const maxIndex = commitIndex >= 0 ? commitIndex : log.length - 1;
   const committed = log.filter((e) => e.index <= maxIndex);
-  res.json({ log: committed.map((e) => e.stroke), commitIndex, logLength: log.length });
+  res.json({
+    log: committed.map((e) => e.stroke),
+    commitIndex,
+    logLength: log.length,
+  });
 });
 
 // Receive stroke from Gateway (leader only)
@@ -229,17 +281,28 @@ app.post("/stroke", async (req, res) => {
   }
 });
 
-// RequestVote RPC
+// ─── RequestVote RPC ──────────────────────────────────────────────────────────
+// FIX: logOk must compare the CANDIDATE's lastLogTerm against MY lastLogTerm,
+//      not the election term. The original code incorrectly compared `term`
+//      (election term) instead of `lastLogTerm` (candidate's last log entry term).
 app.post("/request-vote", (req, res) => {
   const { term, candidateId, lastLogIndex, lastLogTerm } = req.body;
 
+  // If we see a higher term, revert to follower first
   if (term > currentTerm) {
     becomeFollower(term);
   }
 
   const myLastIndex = log.length - 1;
   const myLastTerm = myLastIndex >= 0 ? log[myLastIndex].term : 0;
-  const logOk = term > myLastTerm || (term === myLastTerm && lastLogIndex >= myLastIndex);
+
+  // RAFT log-up-to-date check (§5.4.1):
+  // Candidate's log is at least as up-to-date as ours if:
+  //   - candidate's lastLogTerm > our lastLogTerm, OR
+  //   - same last term AND candidate's log is at least as long
+  const logOk =
+    lastLogTerm > myLastTerm ||
+    (lastLogTerm === myLastTerm && lastLogIndex >= myLastIndex);
 
   const voteGranted =
     term >= currentTerm &&
@@ -251,12 +314,14 @@ app.post("/request-vote", (req, res) => {
     currentTerm = term;
     resetElectionTimer();
     log_(`Voted for ${candidateId} in term ${term}`);
+  } else {
+    log_(`Denied vote for ${candidateId} in term ${term} (logOk=${logOk}, votedFor=${votedFor})`);
   }
 
   res.json({ term: currentTerm, voteGranted });
 });
 
-// AppendEntries RPC
+// ─── AppendEntries RPC ────────────────────────────────────────────────────────
 app.post("/append-entries", (req, res) => {
   const { term, leaderId: lid, entry, prevLogIndex, prevLogTerm } = req.body;
 
@@ -270,14 +335,19 @@ app.post("/append-entries", (req, res) => {
   if (prevLogIndex >= 0) {
     const prevEntry = log[prevLogIndex];
     if (!prevEntry || prevEntry.term !== prevLogTerm) {
-      log_(`prevLog mismatch at ${prevLogIndex}, my log length: ${log.length}`);
-      return res.json({ success: false, term: currentTerm, logLength: log.length });
+      log_(
+        `prevLog mismatch at ${prevLogIndex}, my log length: ${log.length}`
+      );
+      return res.json({
+        success: false,
+        term: currentTerm,
+        logLength: log.length,
+      });
     }
   }
 
-  // Append entry
+  // Append entry (remove conflicts first)
   if (entry) {
-    // Remove any conflicting entries
     if (log.length > entry.index) {
       log.splice(entry.index);
     }
@@ -288,7 +358,7 @@ app.post("/append-entries", (req, res) => {
   res.json({ success: true, term: currentTerm });
 });
 
-// Heartbeat RPC
+// ─── Heartbeat RPC ────────────────────────────────────────────────────────────
 app.post("/heartbeat", (req, res) => {
   const { term, leaderId: lid, commitIndex: leaderCommit } = req.body;
 
@@ -303,7 +373,7 @@ app.post("/heartbeat", (req, res) => {
     resetElectionTimer();
   }
 
-  // Advance commit index
+  // Advance commit index up to what we actually have
   if (leaderCommit > commitIndex) {
     commitIndex = Math.min(leaderCommit, log.length - 1);
   }
@@ -311,7 +381,7 @@ app.post("/heartbeat", (req, res) => {
   res.json({ term: currentTerm, success: true, logLength: log.length });
 });
 
-// Sync log RPC (catch-up for restarted follower)
+// ─── Sync Log RPC (catch-up for restarted follower) ──────────────────────────
 app.post("/sync-log", (req, res) => {
   const { entries, commitIndex: newCommit } = req.body;
   if (!entries || !Array.isArray(entries)) {
@@ -335,12 +405,14 @@ app.post("/sync-log", (req, res) => {
 });
 
 // Health check
-app.get("/health", (_, res) => res.json({ ok: true, id: REPLICA_ID, state, term: currentTerm }));
+app.get("/health", (_, res) =>
+  res.json({ ok: true, id: REPLICA_ID, state, term: currentTerm })
+);
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   log_(`Replica ${REPLICA_ID} started on port ${PORT}`);
-  // Stagger startup to avoid all starting election simultaneously
+  // Stagger startup to avoid all nodes starting elections simultaneously
   const startupDelay = Math.random() * 300;
   setTimeout(resetElectionTimer, startupDelay);
 });
